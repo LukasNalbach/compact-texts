@@ -1,0 +1,3 @@
+[submodule "external/string-utils"]
+	path = external/string-utils
+	url = ../string-utils.git
