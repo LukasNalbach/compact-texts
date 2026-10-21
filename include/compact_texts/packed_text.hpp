@@ -34,14 +34,17 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <istream>
 #include <limits>
 #include <memory>
+#include <ostream>
 #include <numeric>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include <misc/memory.hpp>
+#include <misc/serialize.hpp>
 
 #include <compact_texts/common.hpp>
 
@@ -189,7 +192,7 @@ class packed_text {
       m_wide_min = shift == 0 ? step : std::min(m_wide_min, step);
     }
 
-    m_storage = std::make_shared<std::vector<uint8_t>>();
+    m_storage = std::make_shared<no_init_vector<uint8_t>>();
     resize_no_init(*m_storage, words() * 8 + padding_bytes);
     advise_huge_pages(m_storage->data(), m_storage->size());
     std::memset(m_storage->data() + words() * 8, 0, padding_bytes);
@@ -231,6 +234,33 @@ class packed_text {
   uint8_t width() const { return m_width; }
   uint64_t size_in_bytes() const { return sizeof(*this) + (m_storage ? m_storage->size() : 0); }
   const uint8_t* packed_data() const { return m_bytes; }
+
+  // writes the text as it is in memory: n, sigma, the characters of the symbols (byte texts) and the packed symbols
+  void serialize(std::ostream& out) const {
+    const uint64_t sigma = m_sigma;
+    out.write(reinterpret_cast<const char*>(&m_size), sizeof(m_size));
+    out.write(reinterpret_cast<const char*>(&sigma), sizeof(sigma));
+    if constexpr (is_byte_text) out.write(reinterpret_cast<const char*>(m_to_char.data()), std::streamsize(sigma));
+    write_in_chunks(out, reinterpret_cast<const char*>(m_bytes), words() * 8);
+  }
+
+  // reads a text written by serialize()
+  void load(std::istream& in) {
+    uint64_t sigma = 0;
+    in.read(reinterpret_cast<char*>(&m_size), sizeof(m_size));
+    in.read(reinterpret_cast<char*>(&sigma), sizeof(sigma));
+    m_sigma = decltype(m_sigma)(sigma);
+
+    if constexpr (is_byte_text) {
+      m_to_symbol = {};
+      m_to_char = {};
+      in.read(reinterpret_cast<char*>(m_to_char.data()), std::streamsize(std::min<uint64_t>(sigma, m_to_char.size())));
+      for (uint64_t s = 0; s < m_sigma; ++s) m_to_symbol[m_to_char[s]] = uint8_t(s);
+    }
+
+    init();
+    read_in_chunks(in, reinterpret_cast<char*>(m_storage->data()), words() * 8);
+  }
 
   symbol_type operator[](uint64_t i) const {
     if constexpr (is_byte_text) {
@@ -391,7 +421,7 @@ class packed_text {
   }
 
   void reverse(int threads = omp_get_max_threads()) {
-    auto reversed = std::make_shared<std::vector<uint8_t>>();
+    auto reversed = std::make_shared<no_init_vector<uint8_t>>();
     resize_no_init(*reversed, m_storage->size());
     std::memset(reversed->data() + words() * 8, 0, padding_bytes);
     uint8_t* out = reversed->data();
@@ -444,7 +474,7 @@ class packed_text {
 
   static uint8_t highest_bit(window_t diff) { return uint8_t(63 - std::countl_zero(diff)); }
 
-  std::shared_ptr<std::vector<uint8_t>> m_storage;
+  std::shared_ptr<no_init_vector<uint8_t>> m_storage;
   const uint8_t* m_bytes = nullptr;
   uint64_t m_size = 0;
   window_t m_window_mask = 0;

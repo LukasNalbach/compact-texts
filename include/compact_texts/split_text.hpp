@@ -36,10 +36,12 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <istream>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <ostream>
 #include <utility>
 #include <vector>
 
@@ -60,6 +62,7 @@
 #endif
 
 #include <misc/memory.hpp>
+#include <misc/serialize.hpp>
 
 #include <compact_texts/common.hpp>
 #include <compact_texts/packed_text.hpp>
@@ -190,16 +193,9 @@ class split_text<uint8_t> {
       d.len_of_char[c] = d.len[d.class_of[symbol]];
     }
 
+    init_spread();
+
     for (uint64_t k = 0; k < 64; ++k) {
-#if defined(COMPACT_TEXTS_SPLIT_TEXT_AVX2)
-      const uint64_t bit = ((k >> 1) & 7) * m_width;
-      const uint64_t scale = uint64_t{256} >> (bit & 7);
-      d.spread[k] = uint8_t((bit >> 3) + (k & 1));
-      d.shifts[k] = uint8_t((k & 1) != 0 ? scale >> 8 : scale);
-#else
-      d.spread[k] = uint8_t((k >> 3) * m_width + (k & 7));
-      d.shifts[k] = uint8_t((k & 7) * m_width);
-#endif
       d.direct_symbol[k] = k < classes ? d.symbol_of[k << max_payload] : 0;
       d.direct_char[k] = k < classes ? d.char_of[k << max_payload] : 0;
       d.bit_to_symbol[k] = uint8_t(k / m_width);
@@ -380,6 +376,43 @@ class split_text<uint8_t> {
     return bytes;
   }
 
+  // writes the text as it is in memory: its parameters, its tables, the payloads and the codes of the classes
+  void serialize(std::ostream& out) const {
+    if (!m_data) {
+      split_text empty(histogram_t{}, 0);
+      empty.finish(1);
+      empty.serialize(out);
+      return;
+    }
+
+    for_each_member(*this, *m_data, [&](const auto& member) {
+      out.write(reinterpret_cast<const char*>(&member), sizeof(member));
+    });
+
+    const data_t& d = *m_data;
+    write_vector(out, d.payload);
+    write_vector(out, d.abs);
+    write_vector(out, d.rel);
+    write_vector(out, d.symbol_of);
+    write_vector(out, d.char_of);
+    m_codes.serialize(out);
+  }
+
+  // reads a text written by serialize()
+  void load(std::istream& in) {
+    m_data = std::make_shared<data_t>();
+    data_t& d = *m_data;
+    for_each_member(*this, d, [&](auto& member) { in.read(reinterpret_cast<char*>(&member), sizeof(member)); });
+    read_vector(in, d.payload);
+    read_vector(in, d.abs);
+    read_vector(in, d.rel);
+    read_vector(in, d.symbol_of);
+    read_vector(in, d.char_of);
+    m_codes.load(in);
+    init_spread();
+    cache_pointers();
+  }
+
   static uint64_t size_in_bytes_for(const histogram_t& histogram, uint64_t size, uint64_t penalty = payload_penalty) {
     std::vector<uint64_t> sorted;
     for (uint16_t c = 0; c < 256; ++c) {
@@ -534,12 +567,12 @@ class split_text<uint8_t> {
   struct piece_t {
     uint64_t at = 0;
     uint64_t bits = 0;
-    std::vector<uint64_t> words;
+    no_init_vector<uint64_t> words;
     std::vector<uint16_t> block_bits;
   };
 
   struct data_t {
-    std::vector<uint8_t> payload;
+    no_init_vector<uint8_t> payload;
     std::vector<uint64_t> abs;
     std::vector<uint8_t> rel;
     std::vector<uint8_t> symbol_of;
@@ -561,6 +594,57 @@ class split_text<uint8_t> {
     std::array<uint8_t, 256> to_symbol{};
     std::array<uint8_t, 256> to_char{};
   };
+
+  // calls io(x) for each member x of the text t and of its tables d that serialize() writes as it is
+  template <typename text_t, typename tables_t, typename io_t>
+  static void for_each_member(text_t& t, tables_t& d, io_t io) {
+    io(t.m_size);
+    io(t.m_payload_bits);
+    io(t.m_penalty);
+    io(t.m_short_mask);
+    io(t.m_field_one);
+    io(t.m_field_high);
+    io(t.m_field_low);
+    io(t.m_direct_low);
+    io(t.m_avg_x256);
+    io(t.m_sigma);
+    io(t.m_direct_classes);
+    io(t.m_width);
+    io(t.m_class_mask);
+    io(t.m_short);
+    io(t.m_direct_high);
+    io(t.m_eager);
+    io(t.m_has_payloads);
+    io(d.len);
+    io(d.mask);
+    io(d.direct_symbol);
+    io(d.direct_char);
+    io(d.bit_to_symbol);
+    io(d.class_of);
+    io(d.payload_of);
+    io(d.class_of_char);
+    io(d.payload_of_char);
+    io(d.len_of_char);
+    io(d.to_symbol);
+    io(d.to_char);
+  }
+
+  // computes the tables that place the codes of 64 positions for the vector instructions
+  void init_spread() {
+    data_t& d = *m_data;
+
+    for (uint64_t k = 0; k < 64; ++k) {
+#if defined(COMPACT_TEXTS_SPLIT_TEXT_AVX2)
+      const uint64_t bit = ((k >> 1) & 7) * m_width;
+      const uint64_t scale = uint64_t{256} >> (bit & 7);
+      d.spread[k] = uint8_t((bit >> 3) + (k & 1));
+      d.shifts[k] = uint8_t((k & 1) != 0 ? scale >> 8 : scale);
+#else
+      d.spread[k] = uint8_t((k >> 3) * m_width + (k & 7));
+      d.shifts[k] = uint8_t((k & 7) * m_width);
+#endif
+    }
+  }
 
   void cache_pointers() {
     data_t& d = *m_data;
@@ -1256,7 +1340,7 @@ class split_text<uint32_t> {
     std::stable_sort(d.value_of.begin(), d.value_of.end(),
                      [&](uint32_t a, uint32_t b) { return histogram[a] > histogram[b]; });
     std::vector<uint64_t> sorted;
-    resize_no_init(sorted, sigma);
+    resize_for_overwrite(sorted, sigma);
     for (uint64_t r = 0; r < sigma; ++r) sorted[r] = histogram[d.value_of[r]];
     std::vector<uint8_t> lengths;
     m_width = choose_code(sorted, size, penalty, lengths);
@@ -1407,7 +1491,7 @@ class split_text<uint32_t> {
   void finish(int threads = omp_get_max_threads()) {
     data_t& d = *m_data;
 
-    d.code_of = std::vector<uint64_t>();
+    d.code_of = no_init_vector<uint64_t>();
 
     if (!m_has_payloads) {
       d.pieces = decltype(d.pieces)();
@@ -1643,16 +1727,16 @@ class split_text<uint32_t> {
   struct piece_t {
     uint64_t at = 0;
     uint64_t bits = 0;
-    std::vector<uint64_t> words;
+    no_init_vector<uint64_t> words;
     std::vector<uint16_t> block_bits;
   };
 
   struct data_t {
-    std::vector<uint8_t> payload;
+    no_init_vector<uint8_t> payload;
     std::vector<uint64_t> abs;
     std::vector<uint8_t> rel;
-    std::vector<uint32_t> value_of;
-    std::vector<uint64_t> code_of;
+    no_init_vector<uint32_t> value_of;
+    no_init_vector<uint64_t> code_of;
     std::vector<piece_t> pieces;
     std::mutex mutex;
     alignas(64) std::array<uint8_t, 256> len{};
