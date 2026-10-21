@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <limits>
 #include <random>
+#include <sstream>
 #include <type_traits>
 #include <vector>
 
@@ -227,6 +228,20 @@ static split_text<> build_split(const std::vector<uint8_t>& t, uint16_t threads)
   return text;
 }
 
+// returns a copy of a text written with serialize() and read with load()
+template <typename text_t>
+static text_t serialized_copy(const text_t& text) {
+  std::stringstream stream;
+  text.serialize(stream);
+  text_t copy;
+  copy.load(stream);
+  EXPECT_TRUE(stream.good());
+  EXPECT_EQ(copy.size(), text.size());
+  EXPECT_EQ(copy.sigma(), text.sigma());
+  EXPECT_EQ(copy.size_in_bytes(), text.size_in_bytes());
+  return copy;
+}
+
 static void check_packed(const std::vector<uint8_t>& t) {
   const packed_text<> p(chars(t), t.size(), random_num_threads());
   const uint64_t sigma = num_distinct(t);
@@ -234,6 +249,9 @@ static void check_packed(const std::vector<uint8_t>& t) {
   EXPECT_EQ(p.width(), std::max<int>(1, std::bit_width(sigma - 1)));
   check_access(p, t);
   check_compare(p, t);
+  const packed_text<> loaded = serialized_copy(p);
+  check_access(loaded, t);
+  check_compare(loaded, t);
 }
 
 static void check_split(const std::vector<uint8_t>& t) {
@@ -244,6 +262,10 @@ static void check_split(const std::vector<uint8_t>& t) {
   check_access(s, t);
   check_compare(s, t);
   check_extract(s, t);
+  const split_text<> loaded = serialized_copy(s);
+  check_access(loaded, t);
+  check_compare(loaded, t);
+  check_extract(loaded, t);
 }
 
 static void check_direct(std::vector<uint8_t> t) {
@@ -373,6 +395,7 @@ static void test_int_access() {
       check_extract(s, ref);
     }
 
+    if constexpr (std::is_same_v<text_t, packed_text<uint32_t>>) check_access(serialized_copy(s), ref);
     check_access(s, ref);
   });
 }
