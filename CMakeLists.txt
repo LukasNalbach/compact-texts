@@ -21,7 +21,7 @@ if(NOT TARGET string_utils)
     include("${CMAKE_CURRENT_SOURCE_DIR}/external/string-utils/cmake/settings.cmake")
   endif()
 
-  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/external/string-utils")
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/external/string-utils" EXCLUDE_FROM_ALL)
 endif()
 
 option(COMPACT_TEXTS_BUILD_TESTS "Build the tests" ${PROJECT_IS_TOP_LEVEL})
@@ -33,6 +33,7 @@ target_link_libraries(compact_texts INTERFACE string_utils OpenMP::OpenMP_CXX)
 if(COMPACT_TEXTS_BUILD_TESTS)
   include(GoogleTest)
   enable_testing()
+  string_utils_add_components(tests)
 
   string_utils_add_executable(test-compact-texts tests/test-compact-texts.cpp "${CMAKE_BINARY_DIR}/tests/"
     compact_texts string_utils_test)
