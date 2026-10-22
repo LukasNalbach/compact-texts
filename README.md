@@ -39,7 +39,7 @@ compact-texts uses [string-utils](https://github.com/LukasNalbach/string-utils) 
 A project adds compact-texts as a submodule under `external/compact-texts` and links the target `compact_texts`:
 
 ```cmake
-add_subdirectory(external/compact-texts)
+add_subdirectory(external/compact-texts EXCLUDE_FROM_ALL)
 target_link_libraries(<target> PRIVATE compact_texts)
 ```
 
