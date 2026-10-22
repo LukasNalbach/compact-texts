@@ -25,7 +25,7 @@ The construction of `packed_text` and `split_text` and `reverse()` run in parall
 ## Build
 
 ```shell
-git clone --recursive https://github.com/LukasNalbach/compact-texts.git
+git clone https://github.com/LukasNalbach/compact-texts.git
 cd compact-texts
 cmake -B build -G Ninja
 cmake --build build
