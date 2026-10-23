@@ -338,12 +338,33 @@ static text_t build_int_text(std::vector<uint32_t>& t, uint64_t sigma, uint16_t 
   return text;
 }
 
+// runs fnc(text, reference, sigma) on t as a direct text of packed symbols of t_bytes bytes, each symbol multiplied
+// by a random factor (the reference has the same symbols in 64 bits)
+template <uint8_t t_bytes, typename fnc_t>
+static void with_packed_int_text(const std::vector<uint32_t>& t, uint64_t sigma, fnc_t fnc) {
+  using char_t = packed_unsigned<t_bytes>;
+  // the symbols are reduced to the alphabet of the narrowest packed type
+  const uint64_t base_sigma = std::min<uint64_t>(sigma, uint64_t{1} << (8 * sizeof(packed_unsigned<3>)));
+  const uint64_t mult = random_log_uniform_size(1, char_t::max / base_sigma, gen);
+  std::vector<uint64_t> t64(t.size());
+  std::vector<char_t> packed(t.size());
+
+  for (uint64_t i = 0; i < t.size(); ++i) {
+    t64[i] = uint64_t(t[i] % base_sigma) * mult;
+    packed[i] = t64[i];
+  }
+
+  packed.reserve(packed.size() + text_padding);
+  const uint64_t packed_sigma = (base_sigma - 1) * mult + 1;
+  fnc(direct_text<char_t>(packed.data(), packed.size(), packed_sigma), t64, packed_sigma);
+}
+
 // runs fnc(text, reference, sigma) on an integer text in a random encoding
 template <typename fnc_t>
 static void with_random_int_text(std::vector<uint32_t>& t, uint64_t sigma, fnc_t fnc) {
   const uint16_t threads = random_num_threads();
 
-  switch (uniform<int>(0, 5)) {
+  switch (uniform<int>(0, 8)) {
     case 0: fnc(direct_text<uint32_t>(t.data(), t.size(), sigma), t, sigma); break;
     case 1: fnc(build_int_text<packed_text<uint32_t>>(t, sigma, threads), t, sigma); break;
     case 2: fnc(build_int_text<split_text<uint32_t>>(t, sigma, threads), t, sigma); break;
@@ -362,21 +383,10 @@ static void with_random_int_text(std::vector<uint32_t>& t, uint64_t sigma, fnc_t
       fnc(direct_text<uint64_t>(t64.data(), t64.size(), sigma64), t64, sigma64);
       break;
     }
-    default: {
-      const uint64_t mult = random_log_uniform_size(1, uint40_t::max / sigma, gen);
-      std::vector<uint64_t> t64(t.size());
-      std::vector<uint40_t> t40(t.size());
-
-      for (uint64_t i = 0; i < t.size(); ++i) {
-        t64[i] = uint64_t(t[i]) * mult;
-        t40[i] = t64[i];
-      }
-
-      t40.reserve(t40.size() + text_padding);
-      const uint64_t sigma40 = (sigma - 1) * mult + 1;
-      fnc(direct_text<uint40_t>(t40.data(), t40.size(), sigma40), t64, sigma40);
-      break;
-    }
+    case 5: with_packed_int_text<3>(t, sigma, fnc); break;
+    case 6: with_packed_int_text<5>(t, sigma, fnc); break;
+    case 7: with_packed_int_text<6>(t, sigma, fnc); break;
+    default: with_packed_int_text<7>(t, sigma, fnc); break;
   }
 }
 
