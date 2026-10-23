@@ -48,15 +48,21 @@ struct direct_symbol {
   using type = std::conditional_t<sizeof(t_char_type) == 1, uint8_t, std::make_unsigned_t<t_char_type>>;
 };
 
-template <>
-struct direct_symbol<uint40_t> {
+template <uint8_t t_bytes>
+struct direct_symbol<packed_unsigned<t_bytes>> {
   using type = uint64_t;
 };
 
+// true <=> a direct_text stores symbols of type t_char_type: integers of 1, 2, 4 or 8 bytes, or packed unsigned
+// integers of 3, 5, 6 or 7 bytes (see packed_unsigned)
+template <typename t_char_type>
+inline constexpr bool is_direct_char_v =
+    (std::is_integral_v<t_char_type> && sizeof(t_char_type) <= sizeof(uint64_t)) ||
+    is_packed_unsigned_v<t_char_type>;
+
 template <typename t_char_type = char>
 class direct_text {
-  static_assert(sizeof(t_char_type) == 1 || sizeof(t_char_type) == 2 || sizeof(t_char_type) == 4 ||
-                sizeof(t_char_type) == 8 || std::is_same_v<t_char_type, uint40_t>);
+  static_assert(is_direct_char_v<t_char_type>);
 
  public:
   using char_type = t_char_type;
@@ -219,8 +225,7 @@ struct text_of {
 };
 
 template <typename t_type>
-  requires(std::is_integral_v<t_type> &&
-           (sizeof(t_type) == 1 || sizeof(t_type) == 2 || sizeof(t_type) == 4 || sizeof(t_type) == 8))
+  requires(is_direct_char_v<t_type>)
 struct text_of<t_type> {
   using type = direct_text<t_type>;
 };

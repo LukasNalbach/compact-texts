@@ -14,7 +14,7 @@ All classes are in the namespace `compact_texts` and in [include/compact_texts/]
 
 | Class | Symbol types | Bits per symbol |
 | --- | --- | --- |
-| `direct_text<t>` | `char`, `uint8_t`, 16-, 32-, 40- (`uint40_t`) and 64-bit integers | `8 * sizeof(t)`; the text stays in the caller's array |
+| `direct_text<t>` | `char`, `uint8_t` and integers of 2 to 8 bytes (`uint16_t`, `uint24_t`, `uint32_t`, `uint40_t`, `uint48_t`, `uint56_t`, `uint64_t`) | `8 * sizeof(t)`; the text stays in the caller's array |
 | `packed_text<>`, `packed_text<uint32_t>` | bytes, 32-bit integers | ceil(log2 sigma) |
 | `split_text<>`, `split_text<uint32_t>` | bytes, 32-bit integers | the symbols are grouped by frequency into classes; each position stores the code of its class with a fixed number of bits and, unless its class has only one symbol, the position of the symbol within its class with 1 to 8 more bits |
 
