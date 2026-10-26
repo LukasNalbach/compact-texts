@@ -43,6 +43,7 @@
 
 namespace compact_texts {
 
+// the type of the symbols that a direct_text with characters of type t_char_type returns: unsigned integers
 template <typename t_char_type>
 struct direct_symbol {
   using type = std::conditional_t<sizeof(t_char_type) == 1, uint8_t, std::make_unsigned_t<t_char_type>>;
@@ -60,6 +61,12 @@ inline constexpr bool is_direct_char_v =
     (std::is_integral_v<t_char_type> && sizeof(t_char_type) <= sizeof(uint64_t)) ||
     is_packed_unsigned_v<t_char_type>;
 
+/**
+ * @brief a text stored in the caller's array with one character of type t_char_type per position
+ *
+ * The text is not copied. lce() and lce_left() compare 64 bits at a time.
+ * @tparam t_char_type integers of 1, 2, 4 or 8 bytes, or packed_unsigned of 3, 5, 6 or 7 bytes
+ */
 template <typename t_char_type = char>
 class direct_text {
   static_assert(is_direct_char_v<t_char_type>);
@@ -69,9 +76,12 @@ class direct_text {
   static constexpr bool is_byte_text = sizeof(t_char_type) == 1;
   using symbol_type = typename direct_symbol<t_char_type>::type;
   static constexpr uint64_t symbol_bytes = sizeof(t_char_type);
+  // number of whole symbols in a 64-bit word
   static constexpr uint64_t word_symbols = 8 / symbol_bytes;
+  // whether the symbols tile a 64-bit word (1, 2, 4 or 8 bytes)
   static constexpr bool word_aligned = 8 % symbol_bytes == 0;
 
+  // returns the symbols at i, i + 1, ...
   class cursor {
    public:
     cursor() = default;
@@ -83,8 +93,10 @@ class direct_text {
   };
 
   direct_text() = default;
+  // the text data[0..size)
   direct_text(char_type* data, uint64_t size) : m_data(data), m_size(size) {}
 
+  // the integer text data[0..size) with values in [0..sigma-1]
   direct_text(char_type* data, uint64_t size, uint64_t sigma)
     requires(!is_byte_text)
       : m_data(data), m_size(size), m_sigma(sigma) {}
@@ -103,8 +115,15 @@ class direct_text {
   char_type char_at(uint64_t i) const { return m_data[i]; }
   bool less_char(uint64_t i, uint64_t j) const { return m_data[i] < m_data[j]; }
   symbol_type to_char(symbol_type symbol) const { return symbol; }
+  // returns a cursor whose next() returns T[i], T[i + 1], ...
   cursor cursor_at(uint64_t i) const { return cursor(m_data + i); }
 
+  /**
+   * @brief returns the length of the longest common prefix of T[i..n) and T[j..n), at most max
+   * @param i [0..n-1] position
+   * @param j [0..n-1] position
+   * @param max upper bound for the result
+   */
   uint64_t lce(uint64_t i, uint64_t j,
                uint64_t max = std::numeric_limits<uint64_t>::max()) const {
     if (i == j) [[unlikely]] return std::min(max, m_size - i);
@@ -112,6 +131,7 @@ class direct_text {
     const uint64_t r = std::max(i, j);
     const uint64_t limit = std::min(max, m_size - r);
 
+    // symbols of 3, 5, 6 or 7 bytes: compare 8 bytes at a time, then the symbol of the first difference
     if constexpr (!word_aligned) {
       const uint8_t* a = bytes() + l * symbol_bytes;
       const uint8_t* b = bytes() + r * symbol_bytes;
@@ -143,6 +163,12 @@ class direct_text {
     }
   }
 
+  /**
+   * @brief returns the length of the longest common suffix of T[0..i] and T[0..j], at most max
+   * @param i [0..n-1] position
+   * @param j [0..n-1] position
+   * @param max upper bound for the result
+   */
   uint64_t lce_left(uint64_t i, uint64_t j,
                     uint64_t max = std::numeric_limits<uint64_t>::max()) const {
     if (i == j) [[unlikely]] return std::min(max, i + 1);
@@ -179,10 +205,12 @@ class direct_text {
     }
   }
 
+  // returns whether T[i..i+len) = T[j..j+len)
   bool equal(uint64_t i, uint64_t j, uint64_t len) const {
     return std::memcmp(m_data + i, m_data + j, len * symbol_bytes) == 0;
   }
 
+  // returns a hash value of the bytes of T[i..i+len)
   uint64_t hash(uint64_t i, uint64_t len) const {
     const uint8_t* p = bytes() + i * symbol_bytes;
     const uint64_t len_bytes = len * symbol_bytes;
@@ -194,6 +222,7 @@ class direct_text {
     return hash_mix(h, tail);
   }
 
+  // reverses the text in the caller's array
   void reverse(int threads = omp_get_max_threads()) {
     const uint64_t half = m_size / 2;
 #pragma omp parallel for num_threads(threads)
@@ -206,11 +235,12 @@ class direct_text {
 
   struct no_sigma {};
 
-  char_type* m_data = nullptr;
-  uint64_t m_size = 0;
-  [[no_unique_address]] std::conditional_t<is_byte_text, no_sigma, uint64_t> m_sigma{};
+  char_type* m_data = nullptr; // the caller's array
+  uint64_t m_size = 0; // n
+  [[no_unique_address]] std::conditional_t<is_byte_text, no_sigma, uint64_t> m_sigma{}; // only for integer texts
 };
 
+// the operations that the algorithms over a text use: size(), operator[], cursor_at() and lce()
 template <typename t_text>
 concept text_access = requires(t_text const& text) {
   text.size();
@@ -219,6 +249,7 @@ concept text_access = requires(t_text const& text) {
   text.lce(0, 0, 0);
 };
 
+// the text type for t_type: direct_text<t_type> for a character type, else t_type itself (a text class)
 template <typename t_type>
 struct text_of {
   using type = t_type;
@@ -233,6 +264,7 @@ struct text_of<t_type> {
 template <typename t_type>
 using text_of_t = typename text_of<t_type>::type;
 
+// true <=> t_text is a direct_text
 template <typename t_text>
 inline constexpr bool is_direct_text_v = false;
 
