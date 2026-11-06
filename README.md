@@ -36,6 +36,19 @@ settings and the memory and test helpers. The test is written to `build/tests/` 
 variables are described in string-utils (with the prefix `COMPACT_TEXTS`); with `COMPACT_TEXTS_MARCH_NATIVE` (`ON`),
 `split_text` uses AVX2 or AVX-512 VBMI if the CPU supports them.
 
+### macOS
+
+Apple Clang has no OpenMP runtime; install LLVM's `libomp` and the build tools with [Homebrew](https://brew.sh) (the
+compiler comes with Xcode or the Command Line Tools, `xcode-select --install`):
+
+```shell
+brew install cmake ninja libomp
+```
+
+Then build as above. CMake finds `libomp` in Homebrew or MacPorts, or in the prefix given with `-DOpenMP_ROOT=<prefix>`;
+see [string-utils](https://github.com/LukasNalbach/string-utils#macos) for the details and the differences from Linux.
+Tested on Apple silicon with Apple Clang 21 (macOS 26).
+
 ## C++ usage
 
 Add compact-texts to a CMake project and link the target `compact_texts`:

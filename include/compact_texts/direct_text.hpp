@@ -97,8 +97,7 @@ class direct_text {
   direct_text(char_type* data, uint64_t size) : m_data(data), m_size(size) {}
 
   // the integer text data[0..size) with values in [0..sigma-1]
-  direct_text(char_type* data, uint64_t size, uint64_t sigma)
-    requires(!is_byte_text)
+  direct_text(char_type* data, uint64_t size, uint64_t sigma) requires(!is_byte_text)
       : m_data(data), m_size(size), m_sigma(sigma) {}
 
   char_type* data() const { return m_data; }
